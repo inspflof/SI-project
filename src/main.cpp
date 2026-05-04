@@ -382,24 +382,8 @@ void setup() {
 // ================== LOOP ==================
 void loop() {
   delay(5000);
-  // Serial.println("test fetchcar");
-  // fetchCar(1,1);
-  digitalWrite(IN1Z, HIGH);
-  delay(500);
-  digitalWrite(IN1Z, LOW);
-  delay(500);
-  digitalWrite(IN2Z, HIGH);
-  delay(500);
-  digitalWrite(IN2Z, LOW);
-  delay(500);
-  digitalWrite(IN3Z, HIGH);
-  delay(500);
-  digitalWrite(IN3Z, LOW);
-  delay(500);
-  digitalWrite(IN4Z, HIGH);
-  delay(500);
-  digitalWrite(IN4Z, LOW);
-  delay(500);
+  Serial.println("test fetchcar");
+  fetchCar(1,1);
 }
 
 
