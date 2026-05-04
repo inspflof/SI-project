@@ -8,9 +8,9 @@
 // ================== CONSTANTES ==================
 const int STEPS = 4096;   // 28BYJ-48
 
-const int PAS_PAR_CASE_X = 500;
-const int PAS_PAR_CASE_Y = STEPS;
-const int PAS_Z = STEPS; // avance/recul prise voiture
+const int PAS_PAR_CASE_X = 640;
+const int PAS_PAR_CASE_Y = 2600;
+const int PAS_Z = 4096; // avance/recul prise voiture
 
 // ================== MOTEUR X ==================
 Adafruit_MotorShield AFMS2 = Adafruit_MotorShield(0x61);
@@ -65,8 +65,8 @@ Stepper motorZ(STEPS, IN1Z, IN3Z, IN2Z, IN4Z);
 
 // ================== SERVO ======================
 
-#define SERVOZ1 A0
-#define SERVOZ2 A1
+#define SERVOZ1 18
+#define SERVOZ2 17
 
 Servo servoZ1;
 Servo servoZ2;
@@ -82,31 +82,34 @@ void moveX(int targetX) {
 
   long steps = delta * PAS_PAR_CASE_X;
 
+  // Paramètres doux (comme Y)
+  stepperX.setMaxSpeed(400);
+  stepperX.setAcceleration(150);
+
   stepperX.move(-steps);
 
   while (stepperX.distanceToGo() != 0) {
     stepperX.run();
   }
 
+  motorX->release();  // économie + silence
+
   posX = targetX;
 }
-
 void homeX() {
   Serial.println("Homing X...");
 
-  // Sécurité timeout
   unsigned long start = millis();
 
-  // On force une vitesse lente vers le ENDSTOP
-  stepperX.setMaxSpeed(50);
-  stepperX.setAcceleration(200);
+  // Mouvement doux
+  stepperX.setMaxSpeed(200);
+  stepperX.setAcceleration(100);
 
-  // Mouvement continu vers le home (direction BACKWARD)
+  // Aller vers le endstop
   stepperX.moveTo(100000000);
 
   while (digitalRead(ENDSTOP_X) == HIGH) {
 
-    // arrêt si timeout
     if (millis() - start > 15000) {
       Serial.println("ERREUR: fin de course X non detecte");
       break;
@@ -117,21 +120,26 @@ void homeX() {
 
   Serial.println("Endstop X atteint");
 
-  // STOP
+  // Stop
   stepperX.setCurrentPosition(0);
 
   delay(100);
 
-  // Petit recul pour relâcher le switch
-  stepperX.move(-20);
+  // Petit recul doux
+  stepperX.setMaxSpeed(150);
+  stepperX.setAcceleration(100);
+
+  stepperX.move(-50);
 
   while (stepperX.distanceToGo() != 0) {
     stepperX.run();
   }
 
-  // Reset position logique
+  // Reset position
   stepperX.setCurrentPosition(0);
   posX = 0;
+
+  motorX->release();
 
   Serial.println("Homing X terminé");
 }
@@ -149,6 +157,9 @@ void moveY(int targetY) {
     stepperY1.run();
     stepperY2.run();
   }
+
+  motorY->release();
+  motorY2->release();
 
   posY = targetY;
 }
@@ -191,8 +202,8 @@ void homeY() {
   delay(100);
 
   // Petit recul pour relâcher le switch
-  stepperY1.move(50);
-  stepperY2.move(50);
+  stepperY1.move(100);
+  stepperY2.move(100);
 
   while (stepperY1.distanceToGo() != 0) {
     stepperY1.run();
@@ -203,6 +214,9 @@ void homeY() {
   stepperY1.setCurrentPosition(0);
   stepperY2.setCurrentPosition(0);
   posY = 0;
+
+  motorY->release();
+  motorY2->release();
 
   Serial.println("Homing Y terminé");
 }
@@ -243,11 +257,18 @@ void takeCar() {
   // motorZ.step(PAS_Z);
   servoZ1.write(90);
   delay(500);
-  motorZ.step(2700); 
+  motorZ.step(PAS_Z); 
   delay(500);
   servoZ1.write(180);
   delay(500);
-  motorZ.step(-2700); 
+  motorZ.step(-PAS_Z); 
+  servoZ1.write(90);
+  delay(500);
+  motorZ.step(PAS_Z); 
+  delay(500);
+  servoZ1.write(180);
+  delay(500);
+  motorZ.step(-PAS_Z); 
 
   Serial.println("Voiture prise");
   delay(2000);
@@ -255,7 +276,26 @@ void takeCar() {
 
 void dropCar() {
   Serial.println("Depot voiture");
+
+  servoZ1.write(180);
+  delay(500);
+  motorZ.step(PAS_Z);
+  delay(500);
+  servoZ1.write(90);
+  delay(500);
   motorZ.step(-PAS_Z);
+  delay(500);
+  servoZ1.write(180);
+  delay(500);
+  motorZ.step(PAS_Z);
+  delay(500);
+  servoZ1.write(90);
+  delay(500);
+  motorZ.step(-PAS_Z);
+  
+  Serial.println("Voiture déposée");
+  delay(2000);
+
 }
 
 // ================== LOGIQUE PRINCIPALE ==================
@@ -268,7 +308,7 @@ void fetchCar(int x, int y) {
   Serial.print("Aller a la place ");
   Serial.print(x);
   Serial.print(",");
-  Serial.println(y);
+  Serial.print(y);
 
   moveTo(x, y);
   takeCar();
@@ -291,6 +331,11 @@ void setup() {
   pinMode(ENDSTOP_X, INPUT_PULLUP);
   pinMode(ENDSTOP_Y, INPUT_PULLUP);
   pinMode(ENDSTOP_Z, INPUT_PULLUP);
+
+  pinMode(IN1Z, OUTPUT),
+  pinMode(IN2Z, OUTPUT),
+  pinMode(IN3Z, OUTPUT),
+  pinMode(IN4Z, OUTPUT),
 
   servoZ1.attach(SERVOZ1);
   servoZ2.attach(SERVOZ2);
@@ -323,12 +368,11 @@ void setup() {
   stepperY2.setMaxSpeed(1000);
   stepperY2.setAcceleration(300);
 
-  // motorX->setSpeed(300);  // 10 rpm
   motorY->setSpeed(300);
   motorY2->setSpeed(300);
   
   Serial.println("JE VAIS A LA MAISON");
-  // homeZ();
+  homeZ();
   homeY();
   homeX();
 
@@ -338,22 +382,24 @@ void setup() {
 // ================== LOOP ==================
 void loop() {
   delay(5000);
-
-  Serial.println("TEST X");
-
-  moveX(1);
-  delay(2000);
-
-  moveX(0);
-  delay(2000);
-
-  Serial.println("TEST Y");
-
-  moveY(1);
-  delay(2000);
-
-  moveY(0);
-  delay(2000);
+  // Serial.println("test fetchcar");
+  // fetchCar(1,1);
+  digitalWrite(IN1Z, HIGH);
+  delay(500);
+  digitalWrite(IN1Z, LOW);
+  delay(500);
+  digitalWrite(IN2Z, HIGH);
+  delay(500);
+  digitalWrite(IN2Z, LOW);
+  delay(500);
+  digitalWrite(IN3Z, HIGH);
+  delay(500);
+  digitalWrite(IN3Z, LOW);
+  delay(500);
+  digitalWrite(IN4Z, HIGH);
+  delay(500);
+  digitalWrite(IN4Z, LOW);
+  delay(500);
 }
 
 
