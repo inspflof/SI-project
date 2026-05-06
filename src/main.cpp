@@ -6,7 +6,7 @@
 #include <Wire.h>
 
 // ================== CONSTANTES ==================
-const int STEPS = 4096;   // 28BYJ-48
+const int STEPS = 4096;
 
 const int PAS_PAR_CASE_X = 640;
 const int PAS_PAR_CASE_Y = 2600;
@@ -61,12 +61,13 @@ AccelStepper stepperY2(stepY2, stepY2Back);
 #define IN2Z 11
 #define IN3Z 12
 #define IN4Z 13
-Stepper motorZ(STEPS, IN1Z, IN3Z, IN2Z, IN4Z);
+
+AccelStepper stepperZ(AccelStepper::FULL4WIRE, IN1Z, IN3Z, IN2Z, IN4Z);
 
 // ================== SERVO ======================
 
-#define SERVOZ1 18
-#define SERVOZ2 17
+#define SERVOZ1 17
+#define SERVOZ2 18
 
 Servo servoZ1;
 Servo servoZ2;
@@ -86,7 +87,7 @@ void moveX(int targetX) {
   stepperX.setMaxSpeed(400);
   stepperX.setAcceleration(150);
 
-  stepperX.move(-steps);
+  stepperX.move(steps);
 
   while (stepperX.distanceToGo() != 0) {
     stepperX.run();
@@ -106,16 +107,19 @@ void homeX() {
   stepperX.setAcceleration(100);
 
   // Aller vers le endstop
-  stepperX.moveTo(100000000);
+  stepperX.moveTo(-100000000);
 
   while (digitalRead(ENDSTOP_X) == HIGH) {
-
     if (millis() - start > 15000) {
       Serial.println("ERREUR: fin de course X non detecte");
       break;
     }
 
-    stepperX.run();
+    delay(2);
+
+    if(digitalRead(ENDSTOP_X) == HIGH) {
+      stepperX.run();
+    }
   }
 
   Serial.println("Endstop X atteint");
@@ -129,7 +133,7 @@ void homeX() {
   stepperX.setMaxSpeed(150);
   stepperX.setAcceleration(100);
 
-  stepperX.move(-50);
+  stepperX.move(50);
 
   while (stepperX.distanceToGo() != 0) {
     stepperX.run();
@@ -165,7 +169,7 @@ void moveY(int targetY) {
 }
 
 void homeY() {
-  Serial.println("Homing Y (AccelStepper)...");
+  Serial.println("Homing Y...");
 
   // Sécurité timeout
   unsigned long start = millis();
@@ -182,15 +186,16 @@ void homeY() {
   stepperY2.moveTo(-100000000);
 
   while (digitalRead(ENDSTOP_Y) == HIGH) {
-
     // arrêt si timeout
     if (millis() - start > 50000) {
       Serial.println("ERREUR: fin de course Y non detecte");
       break;
     }
 
-    stepperY1.run();
-    stepperY2.run();
+    if(digitalRead(ENDSTOP_Y) == HIGH) {
+      stepperY1.run();
+      stepperY2.run();
+    }
   }
 
   Serial.println("Endstop Y atteint");
@@ -230,10 +235,18 @@ void homeZ() {
   Serial.println("Homing Z...");
 
   unsigned long start = millis();
-  // Aller vers le fin de course
+
+  // Paramètres doux pour le homing
+  stepperZ.setMaxSpeed(300);
+  stepperZ.setAcceleration(200);
+
+  // Mouvement vers le endstop
+  stepperZ.moveTo(-100000);
+
   while (digitalRead(ENDSTOP_Z) == HIGH) {
-    Serial.println("Homing Z en cours...");
-    motorZ.step(1);  // recule (à adapter si sens inversé)
+    if(digitalRead(ENDSTOP_Z) == HIGH) {
+      stepperZ.run();
+    }
 
     // sécurité timeout
     if (millis() - start > 10000) {
@@ -244,31 +257,70 @@ void homeZ() {
 
   Serial.println("Fin de course Z atteint");
 
-  // Petit dégagement (important pour ne pas rester appuyé)
-  for (int i = 0; i < 2700; i++) {
-    motorZ.step(-1);
+  // Stop et reset position
+  stepperZ.setCurrentPosition(0);
+
+  delay(100);
+
+  // Petit recul pour libérer le switch
+  stepperZ.move((PAS_Z/2)+ 500);
+
+  while (stepperZ.distanceToGo() != 0) {
+    stepperZ.run();
   }
+
+  // Reset position logique
+  stepperZ.setCurrentPosition(0);
 
   Serial.println("Z calibre");
 }
+
+void moveZ(long steps) {
+  stepperZ.move(steps);
+
+  while (stepperZ.distanceToGo() != 0) {
+    stepperZ.run();
+  }
+}
+
 // ================== PRISE VOITURE ==================
 void takeCar() {
   Serial.println("Prise voiture");
-  // motorZ.step(PAS_Z);
+
+  servoZ1.write(0);
+  delay(500);
+
+  moveZ(PAS_Z/2);
+  delay(200);
+
   servoZ1.write(90);
   delay(500);
-  motorZ.step(PAS_Z); 
+
+  moveZ(-PAS_Z); 
+  delay(200);
+
+  servoZ1.write(0);
   delay(500);
-  servoZ1.write(180);
-  delay(500);
-  motorZ.step(-PAS_Z); 
+
+  moveZ(PAS_Z);
+  delay(200);
+
   servoZ1.write(90);
   delay(500);
-  motorZ.step(PAS_Z); 
+
+  moveZ(-PAS_Z); 
+  delay(200);
+
+  servoZ1.write(0);
   delay(500);
-  servoZ1.write(180);
+
+  moveZ(PAS_Z);
+  delay(200);
+
+  servoZ1.write(90);
   delay(500);
-  motorZ.step(-PAS_Z); 
+
+  moveZ((-PAS_Z)/2);
 
   Serial.println("Voiture prise");
   delay(2000);
@@ -277,25 +329,45 @@ void takeCar() {
 void dropCar() {
   Serial.println("Depot voiture");
 
-  servoZ1.write(180);
+  servoZ1.write(0);
   delay(500);
-  motorZ.step(PAS_Z);
-  delay(500);
+
+  moveZ(-(PAS_Z/2));
+  delay(200);
+
   servoZ1.write(90);
   delay(500);
-  motorZ.step(-PAS_Z);
+
+  moveZ(PAS_Z);
+  delay(200);
+
+  servoZ1.write(0);
   delay(500);
-  servoZ1.write(180);
-  delay(500);
-  motorZ.step(PAS_Z);
-  delay(500);
+
+  moveZ(-PAS_Z); 
+  delay(200);
+
   servoZ1.write(90);
   delay(500);
-  motorZ.step(-PAS_Z);
+
+  moveZ(PAS_Z-2000);
+  delay(200);
+
+  servoZ1.write(0);
+  delay(500);
+
+  moveZ(-PAS_Z+2000);
+  servoZ1.write(90);
+
+  moveZ((PAS_Z/2)+1000);
+  delay(500);
+  servoZ1.write(0);
+  delay(200);
+
+  moveZ(-1000);
   
   Serial.println("Voiture déposée");
   delay(2000);
-
 }
 
 // ================== LOGIQUE PRINCIPALE ==================
@@ -320,13 +392,32 @@ void fetchCar(int x, int y) {
   Serial.println("Operation terminee");
 }
 
+void defetcheCar(int x, int y) {
+  if (x < 0 || x > 2 || y < 0 || y > 2) {
+    Serial.println("Coordonnees invalides");
+    return;
+  }
+
+  moveTo(0, 0);
+  Serial.println("Aller au garage");
+
+  takeCar();
+
+  moveTo(x, y);
+  Serial.print("Aller a la place ");
+  Serial.print(x);
+  Serial.print(",");
+  Serial.print(y);
+  dropCar();
+
+}
 // ================== SETUP ==================
 void setup() {
   Wire.begin();
   Wire.setClock(400000); // 400 kHz au lieu de 100 kHz
   Serial.begin(115200);
 
-  while (!Serial);
+  // while (!Serial);
   
   pinMode(ENDSTOP_X, INPUT_PULLUP);
   pinMode(ENDSTOP_Y, INPUT_PULLUP);
@@ -340,10 +431,10 @@ void setup() {
   servoZ1.attach(SERVOZ1);
   servoZ2.attach(SERVOZ2);
 
-  servoZ1.write(90);
+  servoZ1.write(0);
   
-  motorZ.setSpeed(10);
-  
+  stepperZ.setMaxSpeed(200);      // à ajuster
+  stepperZ.setAcceleration(100);  // important pour le couple
   
   if (!AFMS1.begin()) {
     while (1) {
@@ -371,10 +462,10 @@ void setup() {
   motorY->setSpeed(300);
   motorY2->setSpeed(300);
   
-  Serial.println("JE VAIS A LA MAISON");
-  homeZ();
+  Serial.println("Homing...");
   homeY();
   homeX();
+  homeZ();
 
   Serial.println("Parking automatique prêt");
 }
@@ -382,8 +473,13 @@ void setup() {
 // ================== LOOP ==================
 void loop() {
   delay(5000);
-  Serial.println("test fetchcar");
+
+  defetcheCar(2,2);
+  defetcheCar(2,0);
+  defetcheCar(1,1);
   fetchCar(1,1);
+  defetcheCar(0,2);
+  fetchCar(2,2);
+  fetchCar(0,2);
+  fetchCar(2,0);
 }
-
-
