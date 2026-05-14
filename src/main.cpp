@@ -1,9 +1,22 @@
+#include "USBCDC.h"
 #include <Arduino.h>
 #include <Adafruit_MotorShield.h>
 #include <Stepper.h>
 #include <Servo.h>
 #include <AccelStepper.h>
 #include <Wire.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+
+// ================== RESEAU ========================
+
+const char* ssid = "Flo";
+const char* password = "JambonBeurre";
+const char* apiUrl = "https://api.si-project.devflo.freeddns.org/api/command/todo";
+
+unsigned long lastCheckTime = 0;
+const unsigned long checkInterval = 5000;
 
 // ================== CONSTANTES ==================
 const int STEPS = 4096;
@@ -411,13 +424,110 @@ void defetcheCar(int x, int y) {
   dropCar();
 
 }
+
+// ================== MISE À JOUR DU STATUT (PUT) ==================
+
+/**
+ * Envoie une requête PUT pour mettre à jour le statut de la commande sur le serveur.
+ * Format : x-www-form-urlencoded (status=DONE)
+ */
+void updateCommandStatus(int commandId, String newStatus) {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    String updateUrl = "https://api.si-project.devflo.freeddns.org/api/command/" + String(commandId);
+    
+    http.begin(updateUrl);
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+    String httpRequestData = "status=" + newStatus;
+    
+    Serial.print("Mise à jour statut (");
+    Serial.print(newStatus);
+    Serial.println(") pour ID : " + String(commandId));
+
+    int httpResponseCode = http.PUT(httpRequestData);
+
+    if (httpResponseCode > 0) {
+      Serial.print("Réponse serveur : ");
+      Serial.println(httpResponseCode);
+    } else {
+      Serial.print("Erreur lors du PUT : ");
+      // CORRECTION ICI : errorToString au lieu de errorString
+      Serial.println(http.errorToString(httpResponseCode).c_str());
+    }
+
+    http.end();
+  }
+}
+
+// ================== API ====================
+
+void setupWiFi() {
+  Serial.print("Connexion au WiFi : ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi connecté !");
+  Serial.print("Adresse IP : ");
+  Serial.println(WiFi.localIP());
+}
+
+void getCommandFromAPI() {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(apiUrl);
+    
+    int httpCode = http.GET();
+
+    if (httpCode == 200) {
+      String payload = http.getString();
+      
+      // CORRECTION ICI : Utilisation de JsonDocument au lieu de StaticJsonDocument
+      JsonDocument doc; 
+      DeserializationError error = deserializeJson(doc, payload);
+
+      if (!error) {
+        int commandId = doc["id"];
+        const char* type = doc["type"];      
+        const char* status = doc["status"];  
+        int targetX = doc["slot"]["x"];      
+        int targetY = doc["slot"]["y"];      
+
+        if (String(status) == "PENDING") {
+          updateCommandStatus(commandId, "PROCESSING");
+
+          if (String(type) == "PARK") {
+            defetcheCar(targetX, targetY); 
+            updateCommandStatus(commandId, "DONE");
+          } 
+          else if (String(type) == "RETRIEVE") {
+            fetchCar(targetX, targetY); 
+            updateCommandStatus(commandId, "DONE");
+          }
+        }
+      } else {
+        Serial.print("Erreur JSON : ");
+        Serial.println(error.f_str());
+      }
+    }
+    http.end();
+  }
+}
+
 // ================== SETUP ==================
+
 void setup() {
   Wire.begin();
   Wire.setClock(400000); // 400 kHz au lieu de 100 kHz
   Serial.begin(115200);
 
-  // while (!Serial);
+  while (!Serial);
+
+  setupWiFi();
   
   pinMode(ENDSTOP_X, INPUT_PULLUP);
   pinMode(ENDSTOP_Y, INPUT_PULLUP);
@@ -436,19 +546,19 @@ void setup() {
   stepperZ.setMaxSpeed(200);      // à ajuster
   stepperZ.setAcceleration(100);  // important pour le couple
   
-  if (!AFMS1.begin()) {
-    while (1) {
-      Serial.println("Shield 1 non detecte");
-      delay(1000);
-    }
-  }
+  // if (!AFMS1.begin()) {
+  //   while (1) {
+  //     Serial.println("Shield 1 non detecte");
+  //     delay(1000);
+  //   }
+  // }
 
-  if (!AFMS2.begin()) {
-    while (1) {
-      Serial.println("Shield 2 non detecte");
-      delay(1000);
-    }
-  }
+  // if (!AFMS2.begin()) {
+  //   while (1) {
+  //     Serial.println("Shield 2 non detecte");
+  //     delay(1000);
+  //   }
+  // }
 
   stepperX.setMaxSpeed(1000);
   stepperX.setAcceleration(300);
@@ -462,24 +572,21 @@ void setup() {
   motorY->setSpeed(300);
   motorY2->setSpeed(300);
   
-  Serial.println("Homing...");
-  homeY();
-  homeX();
-  homeZ();
+  // Serial.println("Homing...");
+  // homeY();
+  // homeX();
+  // homeZ();
 
   Serial.println("Parking automatique prêt");
 }
 
 // ================== LOOP ==================
 void loop() {
-  delay(5000);
-
-  defetcheCar(2,2);
-  defetcheCar(2,0);
-  defetcheCar(1,1);
-  fetchCar(1,1);
-  defetcheCar(0,2);
-  fetchCar(2,2);
-  fetchCar(0,2);
-  fetchCar(2,0);
+  unsigned long currentMillis = millis();
+  
+  if (currentMillis - lastCheckTime >= checkInterval) {
+    lastCheckTime = currentMillis;
+    Serial.println("Vérification de l'API...");
+    getCommandFromAPI();
+  }
 }
